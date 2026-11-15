@@ -43,6 +43,17 @@ const closes: (bigint | null)[] = [];
 let entryPrice: bigint | null = null;
 /** Batch seq at which the buy filled; null while flat. */
 let entrySeq: number | null = null;
+/** Filled orders this run (counted from the fills each batch reports). */
+let trades = 0;
+
+// Late fallback: if nothing has traded by bar 1200, the day has produced no
+// flush to catch, so take one trend-following shot instead of finishing with
+// zero trades (zero trades fails the race guardrail). It only fires when the
+// market is actually rising, and uses the same exits. On the dev window it
+// never fires, because the primary rule trades long before bar 1200.
+const FALLBACK_SEQ = 1200;
+const FALLBACK_TREND_BPS = 150n; // 120-bar return >= +1.5%
+const FALLBACK_BOUNCE_BPS = 10n; // 5-bar return >= +0.1%
 
 /** Entry price implied by the position's cost basis (fallback only). */
 function costBasisPrice(state: BarsState): bigint | null {
@@ -57,6 +68,7 @@ await runBars({
   onBatch(state: BarsState, batch: Batch): OrderInput[] {
     for (const fill of batch.fills) {
       if (fill.status !== 'filled' || fill.symbol !== SYMBOL) continue;
+      trades += 1;
       if (fill.side === 'buy') {
         entryPrice = BigInt(fill.price);
         entrySeq = state.seq;
@@ -94,6 +106,15 @@ await runBars({
       if (flushed && bouncing && state.cash > 0n) {
         console.error(`buy flush+bounce close=${close} cash=${state.cash}`);
         return [{ side: 'buy', symbol: SYMBOL, notional_quote_units: state.cash, max_slippage_bps: MAX_SLIPPAGE_BPS }];
+      }
+      // Late fallback: no trade yet, late in the window, market rising.
+      if (trades === 0 && state.seq >= FALLBACK_SEQ && state.cash > 0n) {
+        const rising = now * BPS >= then120 * (BPS + FALLBACK_TREND_BPS);
+        const tickingUp = now * BPS >= then5 * (BPS + FALLBACK_BOUNCE_BPS);
+        if (rising && tickingUp) {
+          console.error(`buy fallback-trend close=${close} cash=${state.cash}`);
+          return [{ side: 'buy', symbol: SYMBOL, notional_quote_units: state.cash, max_slippage_bps: MAX_SLIPPAGE_BPS }];
+        }
       }
     }
     return [];
