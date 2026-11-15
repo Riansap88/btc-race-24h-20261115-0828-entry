@@ -25,8 +25,8 @@ and every kit baseline loses money on the same window.
 
 ## Files
 
-- `main.py` — the bot (Python 3.13, standard library only)
-- `vendor/makefun_bars.py` — byte-for-byte copy of the kit's protocol shim
+- `main.ts` — the bot (Node 22, standard library only)
+- `vendor/makefun-bars.ts` — byte-for-byte copy of the kit's protocol shim
 - `LICENSE` — MIT
 
 ## Run locally
